@@ -9,6 +9,50 @@
 #include <stdarg.h>
 #include <string.h>
 
+#ifdef WIN32
+int vasprintf (char **str, const char *fmt, va_list args) {
+  int size = 0;
+  va_list tmpa;
+
+  // copy
+  va_copy(tmpa, args);
+
+  // apply variadic arguments to
+  // sprintf with format to get size
+  size = vsnprintf(NULL, size, fmt, tmpa);
+
+  // toss args
+  va_end(tmpa);
+
+  // return -1 to be compliant if
+  // size is less than 0
+  if (size < 0) { return -1; }
+
+  // alloc with size plus 1 for `\0'
+  *str = (char *) malloc(size + 1);
+
+  // return -1 to be compliant
+  // if pointer is `NULL'
+  if (NULL == *str) { return -1; }
+
+  // format string with original
+  // variadic arguments and set new size
+  size = vsprintf(*str, fmt, args);
+  return size;
+}
+int asprintf (char **str, const char *fmt, ...) {
+  int size = 0;
+  va_list args;
+  // init variadic argumens
+  va_start(args, fmt);
+  // format and get size
+  size = vasprintf(str, fmt, args);
+  // toss args
+  va_end(args);
+  return size;
+}
+#endif
+
 namespace {
 
 const char * log_text[] = {
@@ -26,7 +70,11 @@ void dprintva(FILE * file, fasto::log_level_t level, const char * format, va_lis
   char buf[16] = {0};
 
   time(&etime);
+#ifdef WIN32
+  stm = *localtime(&etime);
+#else
   localtime_r(&etime, &stm);
+#endif
   strftime(buf, sizeof(buf), "%d-%b@%T", &stm);
 
   char * ret = NULL;

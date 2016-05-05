@@ -1,8 +1,11 @@
 // Copyright (c) 2016 Alexandr Topilski. All rights reserved.
 
+#ifdef WIN32
+#else
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #include <pcap.h>
+#endif
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -11,13 +14,6 @@ extern "C" {
 
 const char* outfilename = "out.mp4";
 const char* infilename = "in.pcap";
-
-struct UDP_hdr {
-  u_short uh_sport;       /* source port */
-  u_short uh_dport;       /* destination port */
-  u_short uh_ulen;        /* datagram length */
-  u_short uh_sum;         /* datagram checksum */
-};
 
 int main(int argc, char *argv[]) {
   av_register_all();
