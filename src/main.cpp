@@ -5,6 +5,7 @@
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #include <pcap.h>
+#include <netinet/tcp.h>
 #endif
 
 extern "C" {
@@ -34,21 +35,24 @@ int main(int argc, char *argv[]) {
   pcap_t* pcap = pcap_open_offline_with_tstamp_precision(infilename, PCAP_TSTAMP_PRECISION_NANO, errbuf);
   if (!pcap) {
     fprintf(stderr, "error reading pcap file: %s\n", errbuf);
-    pcap_close(pcap);
     free_video_stream(ostream);
     return EXIT_FAILURE;
   }
 
   struct pcap_pkthdr header;
-  const unsigned char *packet;
+  const u_char *packet;
   while ((packet = pcap_next(pcap, &header)) != NULL) {
     bpf_u_int32 capture_len = header.caplen;
-    /* For simplicity, we assume Ethernet encapsulation. */
-
     if (capture_len < sizeof(struct ether_header)) {
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
+    }
+
+    struct ether_header* ethernet_header = (struct ether_header*)packet;
+    uint16_t ht = ntohs(ethernet_header->ether_type);
+    if (ht != ETHERTYPE_IP) {
+      continue;
     }
 
     /* Skip over the Ethernet header. (14)*/
@@ -71,12 +75,19 @@ int main(int argc, char *argv[]) {
 
     packet += IP_header_length;
     capture_len -= IP_header_length;
+    if (capture_len < sizeof(struct tcphdr)) {
+      pcap_close(pcap);
+      free_video_stream(ostream);
+      return EXIT_FAILURE;
+    }
+
+    packet += sizeof(struct tcphdr);
+    capture_len -= sizeof(struct tcphdr);
 
     media_stream_write_video_frame(ostream, packet, capture_len);
   }
 
   pcap_close(pcap);
   free_video_stream(ostream);
-  // the camera will be deinitialized automatically in VideoCapture destructor
   return EXIT_SUCCESS;
 }
