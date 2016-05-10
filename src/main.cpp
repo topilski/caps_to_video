@@ -4,8 +4,8 @@
 #else
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#include <netinet/udp.h>
 #include <pcap.h>
-#include <netinet/tcp.h>
 #endif
 
 extern "C" {
@@ -13,18 +13,57 @@ extern "C" {
 #include "media/media_stream_output.h"
 }
 
-const char* outfilename = "out.mp4";
-const char* infilename = "in.pcap";
+const char* outfilename = "out.mpg";
+const char* infilename = "full.pcap";
+const uint32_t height = 800;
+const uint32_t width = 1024;
+const uint32_t fps = 25;
+const uint32_t bit_rate = 90000;
+
+struct vgem_hdr {
+  int8_t data[12];
+};
+
+#pragma pack(1)
+struct rtp_hdr {
+#if __BYTE_ORDER == __BIG_ENDIAN
+  //For big endian
+  unsigned char version:2;       // Version, currently 2
+  unsigned char padding:1;       // Padding bit
+  unsigned char extension:1;     // Extension bit
+  unsigned char cc:4;            // CSRC count
+  unsigned char marker:1;        // Marker bit
+  unsigned char payload:7;       // Payload type
+#else
+  //For little endian
+  unsigned char cc:4;            // CSRC count
+  unsigned char extension:1;     // Extension bit
+  unsigned char padding:1;       // Padding bit
+  unsigned char version:2;       // Version, currently 2
+  unsigned char payload:7;       // Payload type
+  unsigned char marker:1;        // Marker bit
+#endif
+
+  uint16_t sequence;        // sequence number
+  uint32_t timestamp;       //  timestamp
+  uint32_t sources;      // contributing sources
+};
+#pragma pack()
+
+struct rtp_ext_hdr {
+  uint16_t profile_data; // Profile data
+  uint16_t length;  //Length
+};
 
 int main(int argc, char *argv[]) {
   av_register_all();
 
   media_stream_params_t params;
-  params.height_video = 800;
-  params.width_video = 1024;
-  params.video_fps = 25;
-  params.bit_stream = 90000;
-  params.codec_id = AV_CODEC_ID_H264;
+  params.height_video = height;
+  params.width_video = width;
+  params.video_fps = fps;
+  params.bit_stream = bit_rate;
+  params.codec_id = AV_CODEC_ID_MPEG2VIDEO;
 
   media_stream_t* ostream = alloc_video_stream(outfilename, &params, false);
   if(!ostream){
@@ -42,7 +81,8 @@ int main(int argc, char *argv[]) {
   struct pcap_pkthdr header;
   const u_char *packet;
   while ((packet = pcap_next(pcap, &header)) != NULL) {
-    bpf_u_int32 capture_len = header.caplen;
+    packet += sizeof(vgem_hdr);
+    bpf_u_int32 capture_len = header.caplen - sizeof(vgem_hdr);
     if (capture_len < sizeof(struct ether_header)) {
       pcap_close(pcap);
       free_video_stream(ostream);
@@ -65,8 +105,12 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
 
-    struct ip* ip = (struct ip*) packet;
-    unsigned int IP_header_length = ip->ip_hl * 4;  /* ip_hl is in 4-byte words */
+    struct iphdr* ip = (struct iphdr*) packet;
+    if (ip->protocol != IPPROTO_UDP) {
+      continue;
+    }
+
+    unsigned int IP_header_length = ip->ihl * 4;  /* ip_hl is in 4-byte words */
     if (capture_len < IP_header_length) { /* didn't capture the full IP header including options */
       pcap_close(pcap);
       free_video_stream(ostream);
@@ -75,15 +119,26 @@ int main(int argc, char *argv[]) {
 
     packet += IP_header_length;
     capture_len -= IP_header_length;
-    if (capture_len < sizeof(struct tcphdr)) {
+
+    if (capture_len < sizeof(udphdr)) {
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
     }
 
-    packet += sizeof(struct tcphdr);
-    capture_len -= sizeof(struct tcphdr);
+    packet += sizeof(udphdr);
+    capture_len -= sizeof(udphdr);
 
+    struct rtp_hdr* rtp = (struct rtp_hdr*) packet;
+    if (capture_len < sizeof(rtp_hdr)) {
+      pcap_close(pcap);
+      free_video_stream(ostream);
+      return EXIT_FAILURE;
+    }
+
+    // rtp payload
+    packet += sizeof(rtp_hdr);
+    capture_len -= sizeof(rtp_hdr);
     media_stream_write_video_frame(ostream, packet, capture_len);
   }
 

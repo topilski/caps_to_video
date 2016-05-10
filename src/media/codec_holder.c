@@ -183,9 +183,8 @@ static void prepare_video_output_stream(output_stream_t* ostream, AVCodec* codec
 
 // =========== end prepare =============== //
 
-static int write_frame(AVFormatContext *fmt_ctx, AVStream *st, AVPacket *pkt) {
+static int write_frame(AVFormatContext* fmt_ctx, AVStream* st, AVPacket* pkt) {
   pkt->stream_index = st->index;
-
   int ret = av_write_frame(fmt_ctx, pkt);
   if (ret < 0) {
     debug_av_perror("av_write_frame", ret);

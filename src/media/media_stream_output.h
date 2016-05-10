@@ -7,7 +7,7 @@
 
 #include "codec_holder.h"
 
-#define DUMP_MEDIA 0
+#define DUMP_MEDIA 1
 
 typedef struct media_stream_params_t {
   uint32_t height_video;
