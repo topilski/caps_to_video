@@ -82,7 +82,7 @@ typedef struct header_enc_frame_t {
 
 #pragma pack(pop)
 
-int find_nal_unit(uint8_t* buf, int size, int* nal_start, int* nal_end, uint8_t* nal_type);
+int find_nal_unit(uint8_t* buf, int size, int* nal_start, int* nal_end, uint8_t* nal_type, int skip_header);
 
 own_nal_unit_t * alloc_own_nal_unit_from_string(const uint8_t* data, uint32_t * len);
 void free_own_nal_unit(own_nal_unit_t * nal_unit);

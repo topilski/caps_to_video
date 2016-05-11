@@ -1,8 +1,10 @@
 SET(GLOBAL_HEADERS
   macros.h
+  log.h
 )
 SET(GLOBAL_SOURCES
   macros.c
+  log.c
 )
 
 SET(MEDIA_HEADERS

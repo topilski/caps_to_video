@@ -2,6 +2,7 @@
 
 #include "codec_holder.h"
 
+#include "macros.h"
 #include "ffmpeg_utils.h"
 
 #define STREAM_FRAME_RATE2 90000

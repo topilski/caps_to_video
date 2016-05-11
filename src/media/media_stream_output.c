@@ -2,6 +2,7 @@
 
 #include "media_stream_output.h"
 
+#include "macros.h"
 #include "time_utils.h"
 #include "ffmpeg_utils.h"
 

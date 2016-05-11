@@ -32,6 +32,7 @@
 #endif
 
 void handle_failure();
+extern void debug_critical_error(const char *format, ...);
 
 #define CHECK(x) if (!(x)) { \
   debug_critical_error("CHECK! %s:%d\n", __FILE__, __LINE__); handle_failure(); \

@@ -51,38 +51,40 @@ struct rtp_hdr {
 };
 #pragma pack()
 
-struct rtp_ext_hdr {
-  uint16_t profile_data; // Profile data
-  uint16_t length;  //Length
-};
-
 struct h264_hdr {
   uint8_t fu_iden;
   uint8_t fu_hdr;
 };
 
 typedef struct {
-    unsigned char type:5;
-    unsigned char nri:2;
-    unsigned char f:1;
+  unsigned char type:5;
+  unsigned char nri:2;
+  unsigned char f:1;
 } nal_unit_header;
 
-#define MAX_NAL_FRAME_LENGTH	200000
-
 typedef struct {
-    unsigned char type:5;
-    unsigned char r:1;
-    unsigned char e:1;
-    unsigned char s:1;
+  unsigned char type:5;
+  unsigned char r:1;
+  unsigned char e:1;
+  unsigned char s:1;
 } fu_header;
 
-#define FU_A_HEADER_LENGTH	2
-
 struct fu_a_packet{
-    nal_unit_header nh;
-    fu_header fuh;
-    unsigned char payload[MAX_NAL_FRAME_LENGTH];
+  nal_unit_header nh;
+  fu_header fuh;
+  unsigned char* payload;
 };
+
+const uint8_t idr_header[] = { 0x00, 0x00, 0x01 };
+
+size_t make_nal_frame(const uint8_t* data, size_t data_len, uint8_t** out_nal) {
+  size_t size_nal = sizeof(idr_header) + data_len;
+  uint8_t* nal_data = (uint8_t*)calloc(size_nal, sizeof(uint8_t));
+  memcpy(nal_data, idr_header, sizeof(idr_header));
+  memcpy(nal_data + sizeof(idr_header), data, data_len);
+  *out_nal = nal_data;
+  return size_nal;
+}
 
 int main(int argc, char *argv[]) {
   av_register_all();
@@ -167,14 +169,62 @@ int main(int argc, char *argv[]) {
     // rtp payload
     packet += sizeof(rtp_hdr);
     packet_len -= sizeof(rtp_hdr);
+    if (packet_len <= 2) {
+      continue;
+    }
 
-    int fragment_type = packet[0] & 0x1F;
-    int nal_type = packet[1] & 0x1F;
-    int start_bit = packet[1] & 0x80;
-    int end_bit = packet[1] & 0x40;
+    size_t offset = 0;
+    uint8_t nal = packet[0];
+    int fragment_type = nal & 0x1F;
+    uint8_t fu_header = packet[1];
+    int nal_type = fu_header & 0x1F;
+    int start_bit = fu_header >> 7;
+    int end_bit = (fu_header & 0x40) >> 6;
+    if (fragment_type == 28) {
+      int fragment_size = packet_len - 2;
+      if (fragment_size > 0) {
+        //If the start bit was set
+        const uint8_t* payload = packet + 2;
+        if (start_bit) {
+          uint8_t fu_indicator = nal;
+          uint8_t reconstructed_nal = fu_indicator & (0xE0);
+          reconstructed_nal |= nal_type;
+
+          size_t size_nal = sizeof(idr_header) + sizeof(nal) + fragment_size;
+          uint8_t* nal_data = (uint8_t*)calloc(size_nal, sizeof(uint8_t));
+          memcpy(nal_data, idr_header, sizeof(idr_header));
+          nal_data[sizeof(idr_header)]= reconstructed_nal;
+          memcpy(nal_data + sizeof(idr_header) + sizeof(nal), payload, fragment_size);
+          media_stream_write_video_frame(ostream, nal_data, size_nal);
+          free(nal_data);
+        } else {
+          media_stream_write_video_frame(ostream, payload, fragment_size);
+        }
+      } else {
+        NOTREACHED();
+      }
+    } else if (fragment_type >= 1 && fragment_type <= 23) {
+      if (fragment_type > 5) {
+        if (fragment_type == NAL_UNIT_TYPE_SEI) {  //sei
+        } else if (fragment_type == NAL_UNIT_TYPE_SPS) {  // sps
+        } else if (fragment_type == NAL_UNIT_TYPE_PPS) {  // pps
+        }
+      }
+
+      uint8_t* nal_data = NULL;
+      size_t size_nal = make_nal_frame(packet, packet_len, &nal_data);
+      media_stream_write_video_frame(ostream, nal_data, size_nal);
+      free(nal_data);
+    } else if(fragment_type == 24) {
+      NOTREACHED();
+    } else if(fragment_type == 29) {
+      //NOTREACHED();
+    } else {
+      NOTREACHED();
+    }
+
     // http://stackoverflow.com/questions/3493742/problem-to-decode-h264-video-over-rtp-with-ffmpeg-libavcodec
-
-    media_stream_write_video_frame(ostream, packet, packet_len);
+    // http://stackoverflow.com/questions/1957427/detect-mpeg4-h264-i-frame-idr-in-rtp-stream
   }
 
 

@@ -19,28 +19,30 @@ const uint8_t pps_header[] = { 0x00, 0x00, 0x01 };
 const uint8_t idr_header[] = { 0x00, 0x00, 0x01 };
 const uint8_t slice_header[] = { 0x00, 0x00, 0x01 };
 
-int find_nal_unit(uint8_t* buf, int size, int* nal_start, int* nal_end, uint8_t* nal_type) {
+int find_nal_unit(uint8_t* buf, int size, int* nal_start, int* nal_end, uint8_t* nal_type, int skip_header) {
   // find start
   *nal_start = 0;
   *nal_end = 0;
 
   int i = 0;
-  while (   //( next_bits( 24 ) != 0x000001 && next_bits( 32 ) != 0x00000001 )
-    (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0x01) &&
-    (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0 || buf[i+3] != 0x01)
-    ) {
-    i++; // skip leading zero
-    if (i+4 >= size) { return 0; }  // did not find nal start
-  }
+  if (!skip_header) {
+      while (   //( next_bits( 24 ) != 0x000001 && next_bits( 32 ) != 0x00000001 )
+        (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0x01) &&
+        (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0 || buf[i+3] != 0x01)
+        ) {
+        i++; // skip leading zero
+        if (i+4 >= size) { return 0; }  // did not find nal start
+      }
 
-  if (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0x01) {  // ( next_bits( 24 ) != 0x000001 )
-    i++;
-  }
+      if (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0x01) {  // ( next_bits( 24 ) != 0x000001 )
+        i++;
+      }
 
-  if (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0x01) {
-    /* error, should never happen */ return 0;
+      if (buf[i] != 0 || buf[i+1] != 0 || buf[i+2] != 0x01) {
+        /* error, should never happen */ return 0;
+      }
+      i+= 3;
   }
-  i+= 3;
   *nal_type = buf[i] & 0x1F;
   *nal_start = i;
 
@@ -57,7 +59,7 @@ int find_nal_unit(uint8_t* buf, int size, int* nal_start, int* nal_end, uint8_t*
   return (*nal_end - *nal_start);
 }
 
-own_nal_unit_t *alloc_own_nal_unit_from_string(const uint8_t *data, uint32_t * len) {
+own_nal_unit_t *alloc_own_nal_unit_from_string(const uint8_t* data, uint32_t* len) {
   *len = 0;
   if (!data) {
     debug_perror("alloc_header_from_string", EINVAL);
