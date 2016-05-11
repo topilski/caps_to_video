@@ -29,9 +29,6 @@
 #define OWN_NAL_UNIT_TYPE 0
 #define OWN_FRAME_TYPE 1
 
-namespace fasto {
-namespace media {
-
 #pragma pack(push, 1)
 
 typedef struct len_value_t {
@@ -100,6 +97,3 @@ uint8_t* create_non_idr_nal_unit(frame_data_t* raw_slice, uint32_t * len);
 int is_key_frame(uint8_t* raw_idr, int32_t len);
 uint8_t* create_sps_pps_key_frame(own_nal_unit_t * nal_u, uint8_t* raw_idr, int32_t len,
                                   uint32_t* olen);
-
-}  // namespace media
-}  // namespace fasto

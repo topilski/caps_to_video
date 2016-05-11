@@ -6,7 +6,7 @@
 #include <memory.h>
 #include <stdlib.h>
 
-#include "log.h"
+#include "media/ffmpeg_utils.h"
 
 #define MEMCPY_VAR(type, hx, var, buff) \
   memcpy(&hx->var, buff + offsetof(type, var), sizeof(hx->var))
@@ -14,15 +14,10 @@
 // https://devtalk.nvidia.com/default/topic/718718/-howto-h-264-mp4-container/
 // http://aviadr1.blogspot.com/2010/05/h264-extradata-partially-explained-for.html
 
-namespace {
-  const uint8_t sps_header[] = { 0x00, 0x00, 0x01 };
-  const uint8_t pps_header[] = { 0x00, 0x00, 0x01 };
-  const uint8_t idr_header[] = { 0x00, 0x00, 0x01 };
-  const uint8_t slice_header[] = { 0x00, 0x00, 0x01 };
-}
-
-namespace fasto {
-namespace media {
+const uint8_t sps_header[] = { 0x00, 0x00, 0x01 };
+const uint8_t pps_header[] = { 0x00, 0x00, 0x01 };
+const uint8_t idr_header[] = { 0x00, 0x00, 0x01 };
+const uint8_t slice_header[] = { 0x00, 0x00, 0x01 };
 
 int find_nal_unit(uint8_t* buf, int size, int* nal_start, int* nal_end, uint8_t* nal_type) {
   // find start
@@ -69,7 +64,7 @@ own_nal_unit_t *alloc_own_nal_unit_from_string(const uint8_t *data, uint32_t * l
     return NULL;
   }
 
-  own_nal_unit_t *h = reinterpret_cast<own_nal_unit_t*>(calloc(1, sizeof(own_nal_unit_t)));
+  own_nal_unit_t* h = (own_nal_unit_t*)(calloc(1, sizeof(own_nal_unit_t)));
   if (!h) {
     debug_perror("calloc", ENOMEM);
     return NULL;
@@ -81,14 +76,15 @@ own_nal_unit_t *alloc_own_nal_unit_from_string(const uint8_t *data, uint32_t * l
   MEMCPY_VAR(own_nal_unit_t, h, parametr_count, data);
   uint32_t off = 1 + sizeof(uint32_t) * 2;  // fix my hardcode
   if (h->parametr_count > 0) {
-    h->parametrs = reinterpret_cast<len_value_t *>(calloc(h->parametr_count, sizeof(len_value_t)));
+    h->parametrs = (len_value_t *)(calloc(h->parametr_count, sizeof(len_value_t)));
     if (!h->parametrs) {
       debug_perror("calloc", ENOMEM);
       free(h);
       return NULL;
     }
 
-    for (int i = 0; i < h->parametr_count; ++i) {
+    int i;
+    for (i = 0; i < h->parametr_count; ++i) {
       struct len_value_t* cur = &h->parametrs[i];
       memcpy(&cur->len, data + off, sizeof(cur->len));
       off += sizeof(cur->len);
@@ -129,7 +125,7 @@ uint8_t* create_sps_nal_unit(len_value_t* raw_sps, uint32_t * len) {
   }
 
   *len = sizeof(sps_header) + raw_sps->len;
-  uint8_t* sps = reinterpret_cast<uint8_t*>(calloc(*len, sizeof(uint8_t)));
+  uint8_t* sps = (uint8_t*)(calloc(*len, sizeof(uint8_t)));
   memcpy(sps, sps_header, sizeof(sps_header));
   memcpy(sps + sizeof(sps_header), raw_sps->value, raw_sps->len);
 
@@ -149,7 +145,7 @@ uint8_t* create_pps_nal_unit(len_value_t* raw_pps, uint32_t * len) {
   }
 
   *len = sizeof(pps_header) + raw_pps->len;
-  uint8_t* pps = reinterpret_cast<uint8_t*>(calloc(*len, sizeof(uint8_t)));
+  uint8_t* pps = (uint8_t*)(calloc(*len, sizeof(uint8_t)));
   memcpy(pps, pps_header, sizeof(pps_header));
   memcpy(pps + sizeof(pps_header), raw_pps->value, raw_pps->len);
 
@@ -163,7 +159,7 @@ header_enc_frame_t * alloc_header_enc_frame_from_string(const uint8_t* data, uin
     return NULL;
   }
 
-  header_enc_frame_t * h = reinterpret_cast<header_enc_frame_t*>(calloc(1, sizeof(header_enc_frame_t)));
+  header_enc_frame_t * h = (header_enc_frame_t*)(calloc(1, sizeof(header_enc_frame_t)));
   MEMCPY_VAR(header_enc_frame_t, h, frametype, data);
   DCHECK(h->frametype == OWN_FRAME_TYPE);
   MEMCPY_VAR(header_enc_frame_t, h, t1, data);
@@ -208,7 +204,7 @@ uint8_t* create_non_idr_nal_unit(frame_data_t* raw_slice, uint32_t * len) {
 
   // DCHECK((raw_idr->data[0] & 0x1F) == NAL_UNIT_TYPE_CODED_SLICE_IDR);
   *len = sizeof(slice_header) + nonidr_len;
-  uint8_t* idr = reinterpret_cast<uint8_t*>(calloc(*len, sizeof(uint8_t)));
+  uint8_t* idr = (uint8_t*)(calloc(*len, sizeof(uint8_t)));
   memcpy(idr, slice_header, sizeof(slice_header));
   memcpy(idr + sizeof(slice_header), nonidr, nonidr_len);
   // idr[*len - 1] = 0x80;
@@ -253,7 +249,7 @@ uint8_t* create_sps_pps_key_frame(own_nal_unit_t * nal_u, uint8_t* raw_idr, int3
   *olen = sizeof(sps_header) + sps_len + sizeof(pps_header) + pps_len +
       sizeof(idr_header) + ridr_len;
 
-  uint8_t* key_frame = reinterpret_cast<uint8_t*>(calloc(*olen, sizeof(uint8_t)));
+  uint8_t* key_frame = (uint8_t*)(calloc(*olen, sizeof(uint8_t)));
 
   uint32_t offset = 0;
   memcpy(key_frame + offset, sps_header, sizeof(sps_header));
@@ -274,6 +270,3 @@ uint8_t* create_sps_pps_key_frame(own_nal_unit_t * nal_u, uint8_t* raw_idr, int3
   DCHECK(offset == *olen);
   return key_frame;
 }
-
-}  // namespace media
-}  // namespace fasto

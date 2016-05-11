@@ -1,10 +1,8 @@
 SET(GLOBAL_HEADERS
   macros.h
-  log.h
 )
 SET(GLOBAL_SOURCES
-  macros.cpp
-  log.cpp
+  macros.c
 )
 
 SET(MEDIA_HEADERS
@@ -14,7 +12,7 @@ SET(MEDIA_HEADERS
   media/codec_holder.h
 )
 SET(MEDIA_SOURCES
-  media/nal_units.cpp
+  media/nal_units.c
   media/media_stream_output.c
   media/ffmpeg_utils.c
   media/codec_holder.c

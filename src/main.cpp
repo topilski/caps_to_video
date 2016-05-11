@@ -11,9 +11,10 @@
 extern "C" {
 #include <libavformat/avformat.h>
 #include "media/media_stream_output.h"
+#include "media/nal_units.h"
 }
 
-const char* outfilename = "out.mpg";
+const char* outfilename = "out.mp4";
 const char* infilename = "full.pcap";
 const uint32_t height = 800;
 const uint32_t width = 1024;
@@ -55,6 +56,34 @@ struct rtp_ext_hdr {
   uint16_t length;  //Length
 };
 
+struct h264_hdr {
+  uint8_t fu_iden;
+  uint8_t fu_hdr;
+};
+
+typedef struct {
+    unsigned char type:5;
+    unsigned char nri:2;
+    unsigned char f:1;
+} nal_unit_header;
+
+#define MAX_NAL_FRAME_LENGTH	200000
+
+typedef struct {
+    unsigned char type:5;
+    unsigned char r:1;
+    unsigned char e:1;
+    unsigned char s:1;
+} fu_header;
+
+#define FU_A_HEADER_LENGTH	2
+
+struct fu_a_packet{
+    nal_unit_header nh;
+    fu_header fuh;
+    unsigned char payload[MAX_NAL_FRAME_LENGTH];
+};
+
 int main(int argc, char *argv[]) {
   av_register_all();
 
@@ -63,7 +92,7 @@ int main(int argc, char *argv[]) {
   params.width_video = width;
   params.video_fps = fps;
   params.bit_stream = bit_rate;
-  params.codec_id = AV_CODEC_ID_MPEG2VIDEO;
+  params.codec_id = AV_CODEC_ID_H264;
 
   media_stream_t* ostream = alloc_video_stream(outfilename, &params, false);
   if(!ostream){
@@ -82,8 +111,8 @@ int main(int argc, char *argv[]) {
   const u_char *packet;
   while ((packet = pcap_next(pcap, &header)) != NULL) {
     packet += sizeof(vgem_hdr);
-    bpf_u_int32 capture_len = header.caplen - sizeof(vgem_hdr);
-    if (capture_len < sizeof(struct ether_header)) {
+    bpf_u_int32 packet_len = header.caplen - sizeof(vgem_hdr);
+    if (packet_len < sizeof(struct ether_header)) {
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
@@ -97,9 +126,9 @@ int main(int argc, char *argv[]) {
 
     /* Skip over the Ethernet header. (14)*/
     packet += sizeof(struct ether_header);
-    capture_len -= sizeof(struct ether_header);
+    packet_len -= sizeof(struct ether_header);
 
-    if (capture_len < sizeof(struct ip)) {
+    if (packet_len < sizeof(struct ip)) {
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
@@ -111,26 +140,25 @@ int main(int argc, char *argv[]) {
     }
 
     unsigned int IP_header_length = ip->ihl * 4;  /* ip_hl is in 4-byte words */
-    if (capture_len < IP_header_length) { /* didn't capture the full IP header including options */
+    if (packet_len < IP_header_length) { /* didn't capture the full IP header including options */
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
     }
 
     packet += IP_header_length;
-    capture_len -= IP_header_length;
+    packet_len -= IP_header_length;
 
-    if (capture_len < sizeof(udphdr)) {
+    if (packet_len < sizeof(udphdr)) {
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
     }
 
     packet += sizeof(udphdr);
-    capture_len -= sizeof(udphdr);
+    packet_len -= sizeof(udphdr);
 
-    struct rtp_hdr* rtp = (struct rtp_hdr*) packet;
-    if (capture_len < sizeof(rtp_hdr)) {
+    if (packet_len < sizeof(rtp_hdr)) {
       pcap_close(pcap);
       free_video_stream(ostream);
       return EXIT_FAILURE;
@@ -138,9 +166,17 @@ int main(int argc, char *argv[]) {
 
     // rtp payload
     packet += sizeof(rtp_hdr);
-    capture_len -= sizeof(rtp_hdr);
-    media_stream_write_video_frame(ostream, packet, capture_len);
+    packet_len -= sizeof(rtp_hdr);
+
+    int fragment_type = packet[0] & 0x1F;
+    int nal_type = packet[1] & 0x1F;
+    int start_bit = packet[1] & 0x80;
+    int end_bit = packet[1] & 0x40;
+    // http://stackoverflow.com/questions/3493742/problem-to-decode-h264-video-over-rtp-with-ffmpeg-libavcodec
+
+    media_stream_write_video_frame(ostream, packet, packet_len);
   }
+
 
   pcap_close(pcap);
   free_video_stream(ostream);
