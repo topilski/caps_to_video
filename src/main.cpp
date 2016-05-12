@@ -16,12 +16,106 @@ extern "C" {
 #include "media/nal_units.h"
 }
 
+static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
+                                'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
+                                'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
+                                'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
+                                'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
+                                'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+                                'w', 'x', 'y', 'z', '0', '1', '2', '3',
+                                '4', '5', '6', '7', '8', '9', '+', '/'};
+static char *decoding_table = NULL;
+static int mod_table[] = {0, 2, 1};
+
+
+char *base64_encode(const unsigned char *data,
+                    size_t input_length,
+                    size_t *output_length) {
+
+    *output_length = 4 * ((input_length + 2) / 3);
+
+    char *encoded_data = (char*)malloc(*output_length);
+    if (encoded_data == NULL) return NULL;
+
+    for (int i = 0, j = 0; i < input_length;) {
+
+        uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
+        uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
+
+        uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+
+        encoded_data[j++] = encoding_table[(triple >> 3 * 6) & 0x3F];
+        encoded_data[j++] = encoding_table[(triple >> 2 * 6) & 0x3F];
+        encoded_data[j++] = encoding_table[(triple >> 1 * 6) & 0x3F];
+        encoded_data[j++] = encoding_table[(triple >> 0 * 6) & 0x3F];
+    }
+
+    for (int i = 0; i < mod_table[input_length % 3]; i++)
+        encoded_data[*output_length - 1 - i] = '=';
+
+    return encoded_data;
+}
+
+
+void build_decoding_table() {
+
+    decoding_table = (char*)malloc(256);
+
+    for (int i = 0; i < 64; i++)
+        decoding_table[(unsigned char) encoding_table[i]] = i;
+}
+
+unsigned char *base64_decode(const char *data,
+                             size_t input_length,
+                             size_t *output_length) {
+
+    if (decoding_table == NULL)
+        build_decoding_table();
+
+    if (input_length % 4 != 0) return NULL;
+
+    *output_length = input_length / 4 * 3;
+    if (data[input_length - 1] == '=') (*output_length)--;
+    if (data[input_length - 2] == '=') (*output_length)--;
+
+    unsigned char *decoded_data = (unsigned char*)malloc(*output_length);
+    if (decoded_data == NULL) return NULL;
+
+    for (int i = 0, j = 0; i < input_length;) {
+
+        uint32_t sextet_a = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+        uint32_t sextet_b = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+        uint32_t sextet_c = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+        uint32_t sextet_d = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+
+        uint32_t triple = (sextet_a << 3 * 6)
+        + (sextet_b << 2 * 6)
+        + (sextet_c << 1 * 6)
+        + (sextet_d << 0 * 6);
+
+        if (j < *output_length) decoded_data[j++] = (triple >> 2 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 1 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 0 * 8) & 0xFF;
+    }
+
+    return decoded_data;
+}
+
+
+void base64_cleanup() {
+    free(decoding_table);
+}
+
 const char* outfilename = "out.mp4";
 const char* infilename = "full.pcap";
 const uint32_t height = 800;
 const uint32_t width = 1024;
 const uint32_t fps = 25;
 const uint32_t bit_rate = 90000;
+
+#define SPS_KEY_HEADER "sprop-parameter-sets"
+#define MARKER "\r\n"
 
 struct vgem_hdr {
   int8_t data[12];
@@ -289,6 +383,32 @@ int main(int argc, char *argv[]) {
           continue;
         }
 
+        const char* start_sps = strstr((const char*)packet, SPS_KEY_HEADER);
+        if (start_sps) {
+          const char* value = start_sps + sizeof(SPS_KEY_HEADER);
+          const char* end = strstr((const char*)value, MARKER);
+          if (end) {
+            size_t len = end - value;
+            for (size_t i = 0; i < len; ++i) {
+              char c = value[i];
+              if (c == ',') {
+                uint8_t* nal_data = NULL;
+                size_t dec1_len = 0;
+                uint8_t* dec1 = base64_decode(value, i, &dec1_len);
+                size_t size_nal = make_nal_frame_header((const uint8_t*)dec1, dec1_len, nal_header, sizeof(nal_header), &nal_data);
+                media_stream_write_video_frame(ostream, nal_data, size_nal);
+
+                nal_data = NULL;
+                size_t start_pps_pos = i + 1;
+                size_t dec2_len = 0;
+                uint8_t* dec2 = base64_decode(value + start_pps_pos, len - start_pps_pos, &dec2_len);
+                size_nal = make_nal_frame_header((const uint8_t*)dec2, dec2_len, nal_header, sizeof(nal_header), &nal_data);
+                media_stream_write_video_frame(ostream, nal_data, size_nal);
+                break;
+              }
+            }
+          }
+        }
         // parse RTSP packet
     }
   }
