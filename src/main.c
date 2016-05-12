@@ -9,108 +9,16 @@
 #include <pcap.h>
 #endif
 
-extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/intreadwrite.h>
 #include "media/media_stream_output.h"
 #include "media/nal_units.h"
-}
 
-static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-                                'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-                                'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
-                                'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
-                                'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
-                                'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-                                'w', 'x', 'y', 'z', '0', '1', '2', '3',
-                                '4', '5', '6', '7', '8', '9', '+', '/'};
-static char *decoding_table = NULL;
-static int mod_table[] = {0, 2, 1};
-
-
-char *base64_encode(const unsigned char *data,
-                    size_t input_length,
-                    size_t *output_length) {
-
-    *output_length = 4 * ((input_length + 2) / 3);
-
-    char *encoded_data = (char*)malloc(*output_length);
-    if (encoded_data == NULL) return NULL;
-
-    for (int i = 0, j = 0; i < input_length;) {
-
-        uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
-        uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
-        uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
-
-        uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
-
-        encoded_data[j++] = encoding_table[(triple >> 3 * 6) & 0x3F];
-        encoded_data[j++] = encoding_table[(triple >> 2 * 6) & 0x3F];
-        encoded_data[j++] = encoding_table[(triple >> 1 * 6) & 0x3F];
-        encoded_data[j++] = encoding_table[(triple >> 0 * 6) & 0x3F];
-    }
-
-    for (int i = 0; i < mod_table[input_length % 3]; i++)
-        encoded_data[*output_length - 1 - i] = '=';
-
-    return encoded_data;
-}
-
-
-void build_decoding_table() {
-
-    decoding_table = (char*)malloc(256);
-
-    for (int i = 0; i < 64; i++)
-        decoding_table[(unsigned char) encoding_table[i]] = i;
-}
-
-unsigned char *base64_decode(const char *data,
-                             size_t input_length,
-                             size_t *output_length) {
-
-    if (decoding_table == NULL)
-        build_decoding_table();
-
-    if (input_length % 4 != 0) return NULL;
-
-    *output_length = input_length / 4 * 3;
-    if (data[input_length - 1] == '=') (*output_length)--;
-    if (data[input_length - 2] == '=') (*output_length)--;
-
-    unsigned char *decoded_data = (unsigned char*)malloc(*output_length);
-    if (decoded_data == NULL) return NULL;
-
-    for (int i = 0, j = 0; i < input_length;) {
-
-        uint32_t sextet_a = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
-        uint32_t sextet_b = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
-        uint32_t sextet_c = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
-        uint32_t sextet_d = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
-
-        uint32_t triple = (sextet_a << 3 * 6)
-        + (sextet_b << 2 * 6)
-        + (sextet_c << 1 * 6)
-        + (sextet_d << 0 * 6);
-
-        if (j < *output_length) decoded_data[j++] = (triple >> 2 * 8) & 0xFF;
-        if (j < *output_length) decoded_data[j++] = (triple >> 1 * 8) & 0xFF;
-        if (j < *output_length) decoded_data[j++] = (triple >> 0 * 8) & 0xFF;
-    }
-
-    return decoded_data;
-}
-
-
-void base64_cleanup() {
-    free(decoding_table);
-}
-
-const char* outfilename = "out.mp4";
+const char* outfilename = "out.mp4";  // use ffmpeg -i out.mp4.data out2.mp4
+                                      // because media_stream_write_video_frame writes frame by frame
 const char* infilename = "full.pcap";
-const uint32_t height = 800;
-const uint32_t width = 1024;
+const uint32_t height = 480;
+const uint32_t width = 640;
 const uint32_t fps = 25;
 const uint32_t bit_rate = 90000;
 
@@ -147,30 +55,6 @@ struct rtp_hdr {
 };
 #pragma pack()
 
-struct h264_hdr {
-  uint8_t fu_iden;
-  uint8_t fu_hdr;
-};
-
-typedef struct {
-  unsigned char type:5;
-  unsigned char nri:2;
-  unsigned char f:1;
-} nal_unit_header;
-
-typedef struct {
-  unsigned char type:5;
-  unsigned char r:1;
-  unsigned char e:1;
-  unsigned char s:1;
-} fu_header;
-
-struct fu_a_packet{
-  nal_unit_header nh;
-  fu_header fuh;
-  unsigned char* payload;
-};
-
 const uint8_t nal_header[] = { 0x00, 0x00, 0x01 };
 
 size_t make_nal_frame_header(const uint8_t* data, size_t data_len, const uint8_t* hdata, size_t hdata_len, uint8_t** out_nal) {
@@ -192,7 +76,7 @@ int main(int argc, char *argv[]) {
   params.bit_stream = bit_rate;
   params.codec_id = AV_CODEC_ID_H264;
 
-  media_stream_t* ostream = alloc_video_stream(outfilename, &params, false);
+  media_stream_t* ostream = alloc_video_stream(outfilename, &params, 0);
   if(!ostream){
     return EXIT_FAILURE;
   }
@@ -208,8 +92,8 @@ int main(int argc, char *argv[]) {
   struct pcap_pkthdr header;
   const u_char *packet;
   while ((packet = pcap_next(pcap, &header)) != NULL) {
-    packet += sizeof(vgem_hdr);
-    bpf_u_int32 packet_len = header.caplen - sizeof(vgem_hdr);
+    packet += sizeof(struct vgem_hdr);
+    bpf_u_int32 packet_len = header.caplen - sizeof(struct vgem_hdr);
     if (packet_len < sizeof(struct ether_header)) {
       pcap_close(pcap);
       free_video_stream(ostream);
@@ -248,25 +132,25 @@ int main(int argc, char *argv[]) {
     packet_len -= IP_header_length;
 
     if (ip->protocol == IPPROTO_UDP) {
-        if (packet_len < sizeof(udphdr)) {
+        if (packet_len < sizeof(struct udphdr)) {
           pcap_close(pcap);
           free_video_stream(ostream);
           return EXIT_FAILURE;
         }
 
-        packet += sizeof(udphdr);
-        packet_len -= sizeof(udphdr);
+        packet += sizeof(struct udphdr);
+        packet_len -= sizeof(struct udphdr);
 
         struct rtp_hdr* rtp = (struct rtp_hdr*)packet;
-        if (packet_len < sizeof(rtp_hdr)) {
+        if (packet_len < sizeof(struct rtp_hdr)) {
           pcap_close(pcap);
           free_video_stream(ostream);
           return EXIT_FAILURE;
         }
 
         // rtp payload
-        packet += sizeof(rtp_hdr);
-        packet_len -= sizeof(rtp_hdr);
+        packet += sizeof(struct rtp_hdr);
+        packet_len -= sizeof(struct rtp_hdr);
         if (packet_len <= 2) {
           continue;
         }
@@ -287,7 +171,8 @@ int main(int argc, char *argv[]) {
               int total_length= 0;
               uint8_t* dst = NULL;
 
-              for(int pass = 0; pass < 2; pass++) {
+              int pass;
+              for(pass = 0; pass < 2; pass++) {
                   const uint8_t* src = packet;
                   int src_len = packet_len;
 
@@ -371,15 +256,15 @@ int main(int argc, char *argv[]) {
         // http://stackoverflow.com/questions/3493742/problem-to-decode-h264-video-over-rtp-with-ffmpeg-libavcodec
         // http://stackoverflow.com/questions/1957427/detect-mpeg4-h264-i-frame-idr-in-rtp-stream
     } else if (ip->protocol == IPPROTO_TCP) {
-        if (packet_len < sizeof(tcphdr)) {
+        if (packet_len < sizeof(struct tcphdr)) {
           continue;
         }
 
         struct tcphdr *tcpheader = (struct tcphdr *)packet;
-        packet += sizeof(tcphdr);
-        packet_len -= sizeof(tcphdr);
+        packet += sizeof(struct tcphdr);
+        packet_len -= sizeof(struct tcphdr);
 
-        if (packet_len < sizeof(rtp_hdr)) {
+        if (packet_len < sizeof(struct rtp_hdr)) {
           continue;
         }
 
@@ -389,21 +274,24 @@ int main(int argc, char *argv[]) {
           const char* end = strstr((const char*)value, MARKER);
           if (end) {
             size_t len = end - value;
-            for (size_t i = 0; i < len; ++i) {
+            size_t i;
+            for (i = 0; i < len; ++i) {
               char c = value[i];
               if (c == ',') {
                 uint8_t* nal_data = NULL;
-                size_t dec1_len = 0;
-                uint8_t* dec1 = base64_decode(value, i, &dec1_len);
-                size_t size_nal = make_nal_frame_header((const uint8_t*)dec1, dec1_len, nal_header, sizeof(nal_header), &nal_data);
+                size_t dec_sps_len = 0;
+                uint8_t* dec_sps = base64_decode((const uint8_t*)value, i, &dec_sps_len);    // alloc
+                size_t size_nal = make_nal_frame_header((const uint8_t*)dec_sps, dec_sps_len, nal_header, sizeof(nal_header), &nal_data);
                 media_stream_write_video_frame(ostream, nal_data, size_nal);
+                free(dec_sps);
 
                 nal_data = NULL;
                 size_t start_pps_pos = i + 1;
-                size_t dec2_len = 0;
-                uint8_t* dec2 = base64_decode(value + start_pps_pos, len - start_pps_pos, &dec2_len);
-                size_nal = make_nal_frame_header((const uint8_t*)dec2, dec2_len, nal_header, sizeof(nal_header), &nal_data);
+                size_t dec_pps_len = 0;
+                uint8_t* dec_pps = base64_decode((const uint8_t*)value + start_pps_pos, len - start_pps_pos, &dec_pps_len);  // alloc
+                size_nal = make_nal_frame_header((const uint8_t*)dec_pps, dec_pps_len, nal_header, sizeof(nal_header), &nal_data);
                 media_stream_write_video_frame(ostream, nal_data, size_nal);
+                free(dec_pps);
                 break;
               }
             }

@@ -40,3 +40,8 @@ extern void debug_critical_error(const char *format, ...);
 
 #define DNOTREACHED() debug_critical_error("NOTREACHED! %s:%d\n", __FILE__, __LINE__); DCHECK(0)
 #define NOTREACHED() DNOTREACHED(); handle_failure()
+
+uint8_t* base64_encode(const uint8_t* src, size_t len,
+                  size_t* out_len);
+uint8_t* base64_decode(const uint8_t* src, size_t len,
+                  size_t* out_len);
